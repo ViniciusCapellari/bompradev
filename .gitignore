@@ -1,0 +1,35 @@
+# Environment
+.env
+*.local
+
+# Java
+**/target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+
+# Node and Expo
+**/node_modules/
+**/.expo/
+**/dist/
+**/web-build/
+npm-debug.log*
+
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Operating system
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+tmp/
+temp/
+
+docs/
+*.md
+!README.md
+

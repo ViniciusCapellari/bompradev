@@ -1,0 +1,13 @@
+CREATE TABLE usuarios (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    nome VARCHAR(120) NOT NULL,
+    email VARCHAR(180) NOT NULL,
+    senha_hash VARCHAR(255) NOT NULL,
+    tipo VARCHAR(20) NOT NULL,
+    ativo BOOLEAN NOT NULL DEFAULT TRUE,
+    criado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    atualizado_em TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT ck_usuarios_tipo CHECK (tipo IN ('USER', 'PROVIDER', 'ADMIN'))
+);
+
+CREATE UNIQUE INDEX uk_usuarios_email ON usuarios (LOWER(email));

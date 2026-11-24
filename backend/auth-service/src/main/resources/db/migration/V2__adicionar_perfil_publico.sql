@@ -1,0 +1,2 @@
+ALTER TABLE usuarios ADD COLUMN biografia VARCHAR(1000);
+ALTER TABLE usuarios ADD COLUMN portfolio VARCHAR(500);

@@ -1,0 +1,189 @@
+name: bompradev
+
+x-telemetria: &telemetria
+  MANAGEMENT_OPENTELEMETRY_TRACING_EXPORT_OTLP_ENDPOINT: http://observabilidade:4318/v1/traces
+  MANAGEMENT_OPENTELEMETRY_LOGGING_EXPORT_OTLP_ENDPOINT: http://observabilidade:4318/v1/logs
+  MANAGEMENT_OTLP_METRICS_EXPORT_URL: http://observabilidade:4318/v1/metrics
+  MANAGEMENT_OTLP_METRICS_EXPORT_STEP: 15s
+  MANAGEMENT_TRACING_SAMPLING_PROBABILITY: 1.0
+
+services:
+  observabilidade:
+    image: grafana/otel-lgtm:0.41.0
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+
+  consul:
+    image: hashicorp/consul:1.21
+    command: agent -server -bootstrap-expect=1 -ui -client=0.0.0.0 -node=consul -data-dir=/consul/data
+    ports:
+      - "127.0.0.1:${CONSUL_HTTP_PORT:-8500}:8500"
+    volumes:
+      - consul-data:/consul/data
+    healthcheck:
+      test: ["CMD", "consul", "operator", "raft", "list-peers"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 3m
+
+  consul-config:
+    image: hashicorp/consul:1.21
+    entrypoint: ["/bin/sh", "/config/load-config.sh"]
+    environment:
+      CONSUL_HTTP_ADDR: http://consul:8500
+      POSTGRES_USER: ${POSTGRES_USER:-bompradev}
+    volumes:
+      - ./infra/consul/load-config.sh:/config/load-config.sh:ro
+    depends_on:
+      consul:
+        condition: service_healthy
+        restart: true
+
+  auth-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bompradev_auth
+      POSTGRES_USER: ${POSTGRES_USER:-bompradev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+    ports:
+      - "127.0.0.1:${AUTH_DB_PORT:-5433}:5432"
+    volumes:
+      - auth-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 3m
+
+  catalog-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bompradev_catalog
+      POSTGRES_USER: ${POSTGRES_USER:-bompradev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - catalog-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 3m
+
+  scheduling-db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: bompradev_scheduling
+      POSTGRES_USER: ${POSTGRES_USER:-bompradev}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+    ports:
+      - "127.0.0.1:5435:5432"
+    volumes:
+      - scheduling-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 3m
+
+  auth-service:
+    build: ./backend/auth-service
+    environment:
+      <<: *telemetria
+      OTEL_SERVICE_NAME: auth-service
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+      CONSUL_HOST: consul
+      SPRING_CONFIG_IMPORT: "consul:"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be defined}
+      SPRING_CLOUD_CONSUL_CONFIG_WATCH_WAIT_TIME: 5
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      auth-db:
+        condition: service_healthy
+        restart: true
+      consul-config:
+        condition: service_completed_successfully
+        restart: true
+      consul:
+        condition: service_healthy
+        restart: true
+
+  catalog-service:
+    build: ./backend/catalog-service
+    environment:
+      <<: *telemetria
+      OTEL_SERVICE_NAME: catalog-service
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+      CONSUL_HOST: consul
+      SPRING_CONFIG_IMPORT: "consul:"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be defined}
+      CLOUDINARY_URL: ${CLOUDINARY_URL:-}
+      SPRING_CLOUD_CONSUL_CONFIG_WATCH_WAIT_TIME: 5
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+        restart: true
+      consul-config:
+        condition: service_completed_successfully
+        restart: true
+      consul:
+        condition: service_healthy
+        restart: true
+
+  scheduling-service:
+    build: ./backend/scheduling-service
+    environment:
+      <<: *telemetria
+      OTEL_SERVICE_NAME: scheduling-service
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be defined}
+      CONSUL_HOST: consul
+      SPRING_CONFIG_IMPORT: "consul:"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be defined}
+      SPRING_CLOUD_CONSUL_CONFIG_WATCH_WAIT_TIME: 5
+    ports:
+      - "127.0.0.1:8083:8083"
+    depends_on:
+      scheduling-db:
+        condition: service_healthy
+        restart: true
+      consul-config:
+        condition: service_completed_successfully
+        restart: true
+      consul:
+        condition: service_healthy
+        restart: true
+
+  api-gateway:
+    build: ./backend/api-gateway
+    environment:
+      <<: *telemetria
+      OTEL_SERVICE_NAME: api-gateway
+      CONSUL_HOST: consul
+      SPRING_CONFIG_IMPORT: "consul:"
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be defined}
+      SPRING_CLOUD_CONSUL_CONFIG_WATCH_WAIT_TIME: 5
+    ports:
+      - "8080:8080"
+    depends_on:
+      consul-config:
+        condition: service_completed_successfully
+        restart: true
+      consul:
+        condition: service_healthy
+        restart: true
+
+volumes:
+  consul-data:
+  auth-data:
+    name: ${AUTH_DATA_VOLUME:-bompradev_auth-data}
+  catalog-data:
+  scheduling-data:
+
